@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Vendor {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  company   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  proposals Proposal[]
+
+  @@map("vendors")
+}
+
+model RFP {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String    @db.Text
+  budget      Float?
+  deadline    DateTime?
+  status      String    @default("draft") // draft, sent, closed
+  requirements Json     // Structured requirements
+  paymentTerms String?
+  warrantyReq String?
+  deliveryTerms String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  proposals Proposal[]
+
+  @@map("rfps")
+}
+
+model Proposal {
+  id              Int      @id @default(autoincrement())
+  rfpId           Int
+  vendorId        Int
+  emailSubject    String?
+  emailBody       String?  @db.Text
+  rawContent      String?  @db.Text
+  parsedData      Json?    // Extracted structured data
+  totalPrice      Float?
+  currency        String?  @default("USD")
+  deliveryDate    DateTime?
+  paymentTerms    String?
+  warranty        String?
+  lineItems       Json?    // Array of line items with prices
+  terms           Json?    // Additional terms and conditions
+  aiSummary       String?  @db.Text
+  aiScore         Float?   // 0-100 score from AI
+  completeness    Float?   // 0-100 completeness score
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rfp    RFP    @relation(fields: [rfpId], references: [id], onDelete: Cascade)
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([rfpId, vendorId])
+  @@map("proposals")
+}
+
