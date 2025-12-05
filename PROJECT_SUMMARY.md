@@ -133,7 +133,6 @@ AI-RFP/
 
 See `backend/env.example` for complete list. Key variables:
 - `DATABASE_URL` - PostgreSQL connection string
-- `OPENAI_API_KEY` - OpenAI API key
 - `SMTP_*` - Email sending configuration
 - `IMAP_*` - Email receiving configuration
 
