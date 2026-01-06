@@ -58,6 +58,7 @@ export interface ComparisonResult {
   };
   summary: string;
   detailedComparison: string;
+  cached?: boolean;
 }
 
 export const rfpsApi = {
@@ -90,8 +91,10 @@ export const rfpsApi = {
     return response.data.sentTo;
   },
 
-  getComparison: async (rfpId: number): Promise<ComparisonResult> => {
-    const response = await client.get(`/rfps/${rfpId}/comparison`);
+  getComparison: async (rfpId: number, forceRefresh: boolean = false): Promise<ComparisonResult> => {
+    const response = await client.get(`/rfps/${rfpId}/comparison`, {
+      params: { refresh: forceRefresh },
+    });
     return response.data.comparison;
   },
 };

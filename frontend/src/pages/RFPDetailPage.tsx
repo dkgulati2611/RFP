@@ -28,9 +28,11 @@ function RFPDetailPage() {
     queryFn: vendorsApi.getAll,
   });
 
+  const [forceRefresh, setForceRefresh] = useState(false);
+
   const { data: comparison, isLoading: comparisonLoading } = useQuery<ComparisonResult>({
-    queryKey: ['comparison', rfpId],
-    queryFn: () => rfpsApi.getComparison(rfpId),
+    queryKey: ['comparison', rfpId, forceRefresh],
+    queryFn: () => rfpsApi.getComparison(rfpId, forceRefresh),
     enabled: showComparison && !!rfpId && (rfp?.proposals?.length || 0) > 0,
   });
 
@@ -193,7 +195,8 @@ function RFPDetailPage() {
                   <h3 className="text-lg font-medium text-gray-900">
                     Proposals ({rfp.proposals?.length || 0})
                   </h3>
-                  {rfp.proposals && rfp.proposals.length > 1 && (
+                {rfp.proposals && rfp.proposals.length > 1 && (
+                  <div className="flex items-center space-x-2">
                     <button
                       onClick={() => setShowComparison(!showComparison)}
                       className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2"
@@ -214,7 +217,23 @@ function RFPDetailPage() {
                         </>
                       )}
                     </button>
-                  )}
+                    {showComparison && (
+                      <button
+                        onClick={() => {
+                          setForceRefresh(!forceRefresh);
+                          queryClient.invalidateQueries({ queryKey: ['comparison', rfpId] });
+                        }}
+                        className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-1"
+                        title="Refresh comparison"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Refresh</span>
+                      </button>
+                    )}
+                  </div>
+                )}
                 </div>
 
                 {rfp.proposals && rfp.proposals.length > 0 ? (
@@ -277,7 +296,14 @@ function RFPDetailPage() {
               <div className="bg-white shadow sm:rounded-lg">
                 <div className="px-4 py-5 sm:p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-medium text-gray-900">AI Comparison & Recommendation</h3>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-medium text-gray-900">AI Comparison & Recommendation</h3>
+                      {comparison && !comparisonLoading && (
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                          {comparison.cached ? 'Cached' : 'Fresh'}
+                        </span>
+                      )}
+                    </div>
                     {comparisonLoading && <LoadingSpinner size="sm" />}
                   </div>
                   

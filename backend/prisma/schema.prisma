@@ -34,6 +34,8 @@ model RFP {
   paymentTerms String?
   warrantyReq String?
   deliveryTerms String?
+  aiComparisonResult Json?  // Cached AI comparison result
+  aiComparisonUpdatedAt DateTime?  // When comparison was last generated
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

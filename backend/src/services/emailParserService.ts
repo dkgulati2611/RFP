@@ -1,9 +1,10 @@
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { aiService } from './aiService';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import crypto from 'crypto';
 
 
 const prisma = new PrismaClient();
@@ -128,7 +129,7 @@ export class EmailParserService {
 
           emailData = {
             subject: parsed.subject || '',
-            from: parsed.from?.text || '',
+            from: parsed.from?.value?.[0]?.address || '',
             text: parsed.text || '',
             html: parsed.html || '',
             attachments: parsed.attachments || [],
@@ -164,6 +165,7 @@ export class EmailParserService {
    * Process vendor response and extract proposal data
    */
   private async processVendorResponse(rfpId: number, emailData: any): Promise<void> {
+    console.log(`Processing vendor response for RFP ${rfpId} from ${emailData.from}`);
     // Find vendor by email
     const vendor = await prisma.vendor.findFirst({
       where: {
@@ -173,6 +175,7 @@ export class EmailParserService {
         },
       },
     });
+    console.log(`Vendor found: ${vendor?.name}`);
 
     if (!vendor) {
       console.log(`Vendor not found for email: ${emailData.from}`);
@@ -192,26 +195,63 @@ export class EmailParserService {
     // Process attachments
     const attachmentContents: Array<{ filename: string; content: string }> = [];
     
+    console.log(`Processing ${emailData.attachments.length} attachment(s) for vendor response`);
+    
     for (const attachment of emailData.attachments) {
       try {
+        const filename = attachment.filename || 'unknown';
+        console.log(`Processing attachment: ${filename} (${attachment.contentType || 'unknown type'})`);
+        
         const content = await this.extractAttachmentContent(attachment);
-        if (content) {
+        if (content && content.trim().length > 0) {
           attachmentContents.push({
-            filename: attachment.filename || 'unknown',
-            content,
+            filename,
+            content: content.trim(),
           });
+          console.log(`Successfully extracted ${content.length} characters from ${filename}`);
+        } else {
+          console.log(`No content extracted from ${filename}`);
         }
       } catch (error) {
         console.error(`Error processing attachment ${attachment.filename}:`, error);
       }
     }
 
-    // Use AI to parse the response
-    const parsedData = await aiService.parseProposalResponse(
-      emailData.text || emailData.html || '',
-      attachmentContents.length > 0 ? attachmentContents : undefined,
-      rfp.requirements
-    );
+    // Check if we already have parsed data for this proposal (avoid re-parsing)
+    const existingProposal = await prisma.proposal.findUnique({
+      where: {
+        rfpId_vendorId: {
+          rfpId,
+          vendorId: vendor.id,
+        },
+      },
+      select: {
+        parsedData: true,
+        rawContent: true,
+        emailBody: true,
+      },
+    });
+
+    // Only re-parse if content has changed or if we don't have parsed data
+    const currentContent = emailData.text || emailData.html || '';
+    const currentContentHash = this.hashContent(currentContent + JSON.stringify(attachmentContents));
+    const existingContentHash = existingProposal?.rawContent 
+      ? this.hashContent(existingProposal.rawContent)
+      : null;
+
+    let parsedData;
+    if (existingProposal?.parsedData && currentContentHash === existingContentHash) {
+      console.log(`Using cached parsed data for proposal from ${vendor.name}`);
+      parsedData = existingProposal.parsedData as any;
+    } else {
+      console.log(`Parsing new vendor response from ${vendor.name}`);
+      // Use AI to parse the response
+      parsedData = await aiService.parseProposalResponse(
+        currentContent,
+        attachmentContents.length > 0 ? attachmentContents : undefined,
+        rfp.requirements
+      );
+    }
 
     // Calculate completeness score (simple heuristic)
     const completeness = this.calculateCompleteness(parsedData, rfp);
@@ -244,6 +284,15 @@ export class EmailParserService {
       },
     });
 
+    // Invalidate cached comparison for this RFP since we have a new/updated proposal
+    await prisma.rFP.update({
+      where: { id: rfpId },
+      data: {
+        aiComparisonResult: Prisma.JsonNull,
+        aiComparisonUpdatedAt: null,
+      },
+    });
+
     console.log(`Processed proposal from ${vendor.name} for RFP ${rfpId}`);
   }
 
@@ -253,28 +302,74 @@ export class EmailParserService {
   private async extractAttachmentContent(attachment: any): Promise<string | null> {
     const contentType = attachment.contentType || '';
     const buffer = attachment.content;
+    const filename = attachment.filename || '';
 
     if (!buffer) {
+      console.log(`No buffer found for attachment: ${filename}`);
       return null;
     }
 
     try {
-      if (contentType.includes('pdf')) {
+      // Handle PDF files
+      if (contentType.includes('pdf') || filename.toLowerCase().endsWith('.pdf')) {
+        console.log(`Extracting text from PDF: ${filename}`);
         const pdfData = await pdfParse(buffer);
-        return pdfData.text;
-      } else if (contentType.includes('word') || contentType.includes('msword') || attachment.filename?.endsWith('.docx')) {
+        const extractedText = pdfData.text;
+        console.log(`Extracted ${extractedText.length} characters from PDF`);
+        return extractedText;
+      } 
+      // Handle Word documents
+      else if (
+        contentType.includes('word') || 
+        contentType.includes('msword') || 
+        contentType.includes('officedocument') ||
+        filename.toLowerCase().endsWith('.docx') ||
+        filename.toLowerCase().endsWith('.doc')
+      ) {
+        console.log(`Extracting text from Word document: ${filename}`);
         const result = await mammoth.extractRawText({ buffer });
+        console.log(`Extracted ${result.value.length} characters from Word document`);
         return result.value;
-      } else if (contentType.includes('text')) {
-        return buffer.toString('utf-8');
-      } else {
-        console.log(`Unsupported attachment type: ${contentType}`);
+      } 
+      // Handle text files
+      else if (contentType.includes('text') || filename.toLowerCase().endsWith('.txt')) {
+        console.log(`Extracting text from text file: ${filename}`);
+        const text = buffer.toString('utf-8');
+        return text;
+      } 
+      // Handle CSV files
+      else if (contentType.includes('csv') || filename.toLowerCase().endsWith('.csv')) {
+        console.log(`Extracting text from CSV: ${filename}`);
+        const text = buffer.toString('utf-8');
+        return text;
+      }
+      // Handle Excel files (basic text extraction)
+      else if (
+        contentType.includes('spreadsheet') ||
+        filename.toLowerCase().endsWith('.xlsx') ||
+        filename.toLowerCase().endsWith('.xls')
+      ) {
+        console.log(`Attempting to extract text from Excel file: ${filename}`);
+        // For Excel, we'll try to extract as text (basic approach)
+        // For better Excel parsing, you might want to add a library like 'xlsx'
+        const text = buffer.toString('utf-8', 0, Math.min(buffer.length, 10000)); // Limit to first 10KB
+        return text.length > 0 ? text : null;
+      }
+      else {
+        console.log(`Unsupported attachment type: ${contentType} for file: ${filename}`);
         return null;
       }
     } catch (error) {
-      console.error(`Error extracting attachment content:`, error);
+      console.error(`Error extracting attachment content from ${filename}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Generate a hash of content for comparison
+   */
+  private hashContent(content: string): string {
+    return crypto.createHash('sha256').update(content).digest('hex');
   }
 
   /**
