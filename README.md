@@ -1,6 +1,6 @@
 # AI-Powered RFP Management System
 
-An intelligent Request for Proposal (RFP) management system that streamlines procurement workflows using AI to create RFPs from natural language, parse vendor responses, and provide intelligent recommendations.
+An intelligent Request for Proposal (RFP) management system that streamlines procurement workflows using AI to create RFPs from natural language, parse vendor responses, and provide intelligent recommendations based on scores.
 
 ## Table of Contents
 
